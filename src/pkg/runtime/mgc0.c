@@ -2400,6 +2400,26 @@ mgc(G *gp)
 }
 
 static void
+nano_to_string(int64 val, byte* buf, int32 n)
+{
+	int64 hour, min, secs, usecs;
+	int64 day, gmt = -8;
+
+	day = val / 1000000000;
+	usecs = (val - (day * 1000000000)) / 1000;
+	day = day % (60 * 60 * 24);
+
+	hour  = day / (60 * 60) + gmt;
+	min   = (day % (60 * 60)) / 60;
+	secs  = (day % (60 * 60)) % 60;
+
+  // ensure TZ hasn't wrapped us
+  if (hour < 0) { hour += 24; }
+
+	runtime·snprintf(buf, n, "%D:%D:%D.%D", hour, min, secs, usecs);
+}
+
+static void
 gc(struct gc_args *args)
 {
 	int64 tX, t0, t1, t2, t3, t4;
@@ -2407,6 +2427,7 @@ gc(struct gc_args *args)
 	GCStats stats;
 	uint32 i;
 	Eface eface;
+	byte buf[64];
 
 	if(runtime·debug.allocfreetrace)
 		runtime·tracegc();
@@ -2494,10 +2515,12 @@ gc(struct gc_args *args)
 		stats.nosyield += work.markfor->nosyield;
 		stats.nsleep += work.markfor->nsleep;
 
-		runtime·printf("gc%d(%d): %D+%D+%D+%D+%D us, %D -> %D MB, %D (%D-%D) objects,"
+		nano_to_string(mstats.last_gc, buf, 64);
+
+		runtime·printf("gc%d(%d)[%s (%D)]: %D+%D+%D+%D+%D us, %D -> %D MB, %D (%D-%D) objects,"
 				" %d/%d/%d sweeps,"
 				" %D(%D) handoff, %D(%D) steal, %D/%D/%D yields\n",
-			mstats.numgc, work.nproc,
+			mstats.numgc, work.nproc, buf, mstats.last_gc,
 			(t0-tX)/1000, (t1-t0)/1000, (t2-t1)/1000, (t3-t2)/1000, (t4-t3)/1000,
 			heap0>>20, heap1>>20, obj,
 			mstats.nmalloc, mstats.nfree,
