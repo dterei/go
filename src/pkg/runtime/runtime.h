@@ -581,6 +581,7 @@ struct DebugVars
 	int32	efence;
 	int32	gctrace;
 	int32	gcdead;
+	int32 gcnoscvg;
 	int32	scheddetail;
 	int32	schedtrace;
 };

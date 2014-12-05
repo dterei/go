@@ -236,7 +236,12 @@ runtime·main(void)
 
 	if(m != &runtime·m0)
 		runtime·throw("runtime·main not on m0");
-	runtime·newproc1(&scavenger, nil, 0, 0, runtime·main);
+
+	if(runtime·debug.gcnoscvg > 1)
+		runtime·printf("scvg: disabled\n");
+	else
+		runtime·newproc1(&scavenger, nil, 0, 0, runtime·main);
+
 	main·init();
 
 	if(g->defer != &d || d.fn != &initDone)

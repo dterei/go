@@ -547,7 +547,8 @@ runtime·MHeap_Scavenger(void)
 			runtime·lock(h);
 		}
 		now = runtime·nanotime();
-		scavenge(k, now, limit);
+		if(!runtime·debug.gcnoscvg)
+			scavenge(k, now, limit);
 		runtime·unlock(h);
 	}
 }
