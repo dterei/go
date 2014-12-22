@@ -368,7 +368,7 @@ struct	M
 	uint8	traceback;
 	bool	(*waitunlockf)(G*, void*);
 	void*	waitlock;
-	uintptr scalararg[4];	// scalar argument/return for mcall
+	uintptr scalararg[5];	// scalar argument/return for mcall
 	void*   ptrarg[4];	// pointer argument/return for mcall
 #ifdef GOOS_windows
 	uintptr	thread;		// thread handle

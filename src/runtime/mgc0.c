@@ -1327,6 +1327,7 @@ runtime·updatememstats(GCStats *stats)
 struct gc_args
 {
 	int64 start_time; // start time of GC in ns (just before stoptheworld)
+	int64 notify_time; // time we notified mutator that we rts wants to GC
 	bool  eagersweep;
 };
 
@@ -1368,6 +1369,7 @@ runtime·gc_m(void)
 	gp->waitreason = runtime·gostringnocopy((byte*)"garbage collection");
 
 	a.start_time = (uint64)(g->m->scalararg[0]) | ((uint64)(g->m->scalararg[1]) << 32);
+	a.notify_time = (uint64)(g->m->scalararg[2]) | ((uint64)(g->m->scalararg[3]) << 32);
 	a.eagersweep = g->m->scalararg[2];
 	gc(&a);
 
@@ -1386,7 +1388,7 @@ runtime·gc_m(void)
 static void
 gc(struct gc_args *args)
 {
-	int64 t0, t1, t2, t3, t4;
+	int64 tX, t0, t1, t2, t3, t4;
 	uint64 heap0, heap1, obj;
 	GCStats stats;
 	byte buf[64];
@@ -1398,6 +1400,7 @@ gc(struct gc_args *args)
 		runtime·tracegc();
 
 	g->m->traceback = 2;
+	tX = args->notify_time;
 	t0 = args->start_time;
 	runtime·work.tstart = args->start_time; 
 
@@ -1466,6 +1469,8 @@ gc(struct gc_args *args)
 	mstats.pause_ns[mstats.numgc%nelem(mstats.pause_ns)] = t4 - t0;
 	mstats.pause_end[mstats.numgc%nelem(mstats.pause_end)] = t4;
 	mstats.pause_total_ns += t4 - t0;
+	mstats.notify_ns[mstats.numgc%nelem(mstats.notify_ns)] = t0 - tX;
+	mstats.notify_total_ns += t0 - tX;
 	mstats.numgc++;
 	if(mstats.debuggc)
 		runtime·printf("pause %D\n", t4-t0);
@@ -1485,12 +1490,12 @@ gc(struct gc_args *args)
 		
 		nano_to_string(mstats.last_gc, buf, 64);
 
-		runtime·printf("gc%d(%d)[%s (%D)]: %D+%D+%D+%D us, %D -> %D MB, %D (%D-%D) objects,"
+		runtime·printf("gc%d(%d)[%s (%D)]: %D+%D+%D+%D+%D us, %D -> %D MB, %D (%D-%D) objects,"
 				" %d goroutines,"
 				" %d/%d/%d sweeps,"
 				" %D(%D) handoff, %D(%D) steal, %D/%D/%D yields\n",
 			mstats.numgc, runtime·work.nproc, buf, mstats.last_gc,
-			(t1-t0)/1000, (t2-t1)/1000, (t3-t2)/1000, (t4-t3)/1000,
+			(t0-tX)/1000, (t1-t0)/1000, (t2-t1)/1000, (t3-t2)/1000, (t4-t3)/1000,
 			heap0>>20, heap1>>20, obj,
 			mstats.nmalloc, mstats.nfree,
 			runtime·gcount(),

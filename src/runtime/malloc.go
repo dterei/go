@@ -34,6 +34,13 @@ const (
 	concurrentSweep = _ConcurrentSweep != 0
 )
 
+// Blade GC Callback type
+type GCCallback func (uint32, uint64, uint64) bool
+
+var gcInProgress = false
+var warnGCCallback GCCallback = nil
+var notifyTime int64
+
 // Page number (address>>pageShift)
 type pageID uintptr
 
@@ -408,8 +415,23 @@ func profilealloc(mp *m, x unsafe.Pointer, size uintptr) {
 	mProf_Malloc(x, size)
 }
 
+// call into the users app if a GC callback was registered, returning true if
+// collection should occur now and false if it should be deferred.
+func userDeferredGC() bool {
+	if warnGCCallback == nil {
+		return false
+	}
+	pause := uint64(0)
+	if (memstats.numgc >= 1) {
+		pause = memstats.pause_ns[
+			(memstats.numgc-1) % uint32(len(memstats.pause_ns)) ]
+	}
+	return warnGCCallback(memstats.numgc + 1, memstats.alloc, pause)
+}
+
 // force = 1 - do GC regardless of current heap usage
-// force = 2 - go GC and eager sweep
+// force = 2 - do GC and eager sweep
+// force = 3 - resume GC from user suspend
 func gogc(force int32) {
 	// The gc is turned off (via enablegc) until the bootstrap has completed.
 	// Also, malloc gets called in the guts of a number of libraries that might be
@@ -426,11 +448,26 @@ func gogc(force int32) {
 
 	semacquire(&worldsema, false)
 
-	if force == 0 && memstats.heap_alloc < memstats.next_gc {
+	if force == 0 && memstats.heap_alloc < memstats.next_gc ||
+			gcInProgress && force != 3 {
 		// typically threads which lost the race to grab
 		// worldsema exit here when gc is done.
 		semrelease(&worldsema)
 		return
+	}
+
+	// check with app if we can GC now
+	gcInProgress = true
+	if force != 3 {
+		notifyTime = nanotime()
+		semrelease(&worldsema)
+		if userDeferredGC() {
+			if debug.gctrace >= 1 {
+				println("Deferring gc", memstats.numgc + 1)
+			}
+			return
+		}
+		semacquire(&worldsema, false)
 	}
 
 	// Ok, we're doing it!  Stop everybody else
@@ -461,15 +498,18 @@ func gogc(force int32) {
 		// switch to g0, call gc, then switch back
 		mp.scalararg[0] = uintptr(uint32(startTime)) // low 32 bits
 		mp.scalararg[1] = uintptr(startTime >> 32)   // high 32 bits
-		if force >= 2 {
-			mp.scalararg[2] = 1 // eagersweep
+		mp.scalararg[2] = uintptr(uint32(notifyTime)) // low 32 bits
+		mp.scalararg[3] = uintptr(notifyTime >> 32)   // high 32 bits
+		if force == 2 {
+			mp.scalararg[4] = 1 // eagersweep
 		} else {
-			mp.scalararg[2] = 0
+			mp.scalararg[4] = 0
 		}
 		onM(gc_m)
 	}
 
 	// all done
+	gcInProgress = false
 	mp.gcing = 0
 	semrelease(&worldsema)
 	onM(starttheworld)
@@ -486,6 +526,17 @@ func gogc(force int32) {
 // GC runs a garbage collection.
 func GC() {
 	gogc(2)
+}
+
+// GCStart resumes a garbage collection after it was suspended.
+func GCStart() {
+	gogc(3)
+}
+
+// Register a function to be called when the runtime wants to GC. The GC will
+// only occur once the callback returns.
+func RegisterGCCallback(cb GCCallback) {
+	warnGCCallback = cb
 }
 
 // linker-provided
