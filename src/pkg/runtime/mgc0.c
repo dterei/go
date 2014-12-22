@@ -209,6 +209,8 @@ static void	addstackroots(G *gp, Workbuf **wbufp);
 static FuncVal runfinqv = {runfinq};
 static FuncVal bgsweepv = {bgsweep};
 
+static FuncVal* warnGCCallback;
+
 static struct {
 	uint64	full;  // lock-free list of full blocks
 	uint64	empty; // lock-free list of empty blocks
@@ -2242,9 +2244,13 @@ runtime·updatememstats(GCStats *stats)
 // This allows the arguments to be passed via runtime·mcall.
 struct gc_args
 {
+	int64 notify_time; // time we notified user level that we wanted to GC
 	int64 start_time; // start time of GC in ns (just before stoptheworld)
 	bool  eagersweep;
 };
+
+static bool gcinprogress = false;
+static int64 notify_time = 0;
 
 static void gc(struct gc_args *args);
 static void mgc(G *gp);
@@ -2262,13 +2268,39 @@ readgogc(void)
 	return runtime·atoi(p);
 }
 
+void
+runtime·RegisterGCCallback(FuncVal *f)
+{
+	warnGCCallback = f;
+}
+
+static int64
+callWarnGCCallback(void)
+{
+	int64 args[4];
+
+	if(warnGCCallback == nil) return 0;
+
+	args[0] = mstats.alloc;
+	if (mstats.numgc >= 1) {
+		args[1] = mstats.pause_ns[(mstats.numgc-1)%nelem(mstats.pause_ns)];
+	}
+	args[2] = (int64) &args[3];
+	args[3] = 0;
+
+	reflect·call(warnGCCallback, (byte*) args, 24, 24);
+
+	return args[3];
+}
+
 // force = 1 - do GC regardless of current heap usage
-// force = 2 - go GC and eager sweep
+// force = 2 - do GC and eager sweep
 void
 runtime·gc(int32 force)
 {
 	struct gc_args a;
 	int32 i;
+	int64 r;
 
 	// The atomic operations are not atomic if the uint64s
 	// are not aligned on uint64 boundaries. This has been
@@ -2299,16 +2331,30 @@ runtime·gc(int32 force)
 		return;
 
 	runtime·semacquire(&runtime·worldsema, false);
-	if(force==0 && mstats.heap_alloc < mstats.next_gc) {
+	if((force==0 && mstats.heap_alloc < mstats.next_gc) ||
+			(gcinprogress && force != 3)) {
 		// typically threads which lost the race to grab
 		// worldsema exit here when gc is done.
 		runtime·semrelease(&runtime·worldsema);
 		return;
 	}
 
+	gcinprogress = true;
+
+	if (force != 3) {
+		notify_time = runtime·nanotime();
+		runtime·semrelease(&runtime·worldsema);
+		r = callWarnGCCallback(); // release lock around callback, as it may alloc
+		if (r == 1) {
+			return;
+		}
+		runtime·semacquire(&runtime·worldsema, false);
+	}
+
 	// Ok, we're doing it!  Stop everybody else
 	a.start_time = runtime·nanotime();
-	a.eagersweep = force >= 2;
+	a.notify_time = notify_time;
+	a.eagersweep = force == 2;
 	m->gcing = 1;
 	runtime·stoptheworld();
 	
@@ -2332,6 +2378,7 @@ runtime·gc(int32 force)
 	// all done
 	m->gcing = 0;
 	m->locks++;
+	gcinprogress = false;
 	runtime·semrelease(&runtime·worldsema);
 	runtime·starttheworld();
 	m->locks--;
@@ -2355,7 +2402,7 @@ mgc(G *gp)
 static void
 gc(struct gc_args *args)
 {
-	int64 t0, t1, t2, t3, t4;
+	int64 tX, t0, t1, t2, t3, t4;
 	uint64 heap0, heap1, obj, ninstr;
 	GCStats stats;
 	uint32 i;
@@ -2365,6 +2412,7 @@ gc(struct gc_args *args)
 		runtime·tracegc();
 
 	m->traceback = 2;
+	tX = args->notify_time;
 	t0 = args->start_time;
 	work.tstart = args->start_time; 
 
@@ -2426,7 +2474,9 @@ gc(struct gc_args *args)
 	t4 = runtime·nanotime();
 	mstats.last_gc = runtime·unixnanotime();  // must be Unix time to make sense to user
 	mstats.pause_ns[mstats.numgc%nelem(mstats.pause_ns)] = t4 - t0;
+	mstats.notify_ns[mstats.numgc%nelem(mstats.notify_ns)] = t0 - tX;
 	mstats.pause_total_ns += t4 - t0;
+	mstats.notify_total_ns += t0 - tX;
 	mstats.numgc++;
 	if(mstats.debuggc)
 		runtime·printf("pause %D\n", t4-t0);
@@ -2444,10 +2494,11 @@ gc(struct gc_args *args)
 		stats.nosyield += work.markfor->nosyield;
 		stats.nsleep += work.markfor->nsleep;
 
-		runtime·printf("gc%d(%d): %D+%D+%D+%D us, %D -> %D MB, %D (%D-%D) objects,"
+		runtime·printf("gc%d(%d): %D+%D+%D+%D+%D us, %D -> %D MB, %D (%D-%D) objects,"
 				" %d/%d/%d sweeps,"
 				" %D(%D) handoff, %D(%D) steal, %D/%D/%D yields\n",
-			mstats.numgc, work.nproc, (t1-t0)/1000, (t2-t1)/1000, (t3-t2)/1000, (t4-t3)/1000,
+			mstats.numgc, work.nproc,
+			(t0-tX)/1000, (t1-t0)/1000, (t2-t1)/1000, (t3-t2)/1000, (t4-t3)/1000,
 			heap0>>20, heap1>>20, obj,
 			mstats.nmalloc, mstats.nfree,
 			sweep.nspan, gcstats.nbgsweep, gcstats.npausesweep,

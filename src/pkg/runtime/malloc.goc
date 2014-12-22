@@ -853,6 +853,10 @@ func GC() {
 	runtime·gc(2);  // force GC and do eager sweep
 }
 
+func GCStart() {
+	runtime·gc(3);  // force GC and do eager sweep
+}
+
 func SetFinalizer(obj Eface, finalizer Eface) {
 	byte *base;
 	uintptr size;

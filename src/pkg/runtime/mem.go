@@ -45,6 +45,8 @@ type MemStats struct {
 	LastGC       uint64 // last run in absolute time (ns)
 	PauseTotalNs uint64
 	PauseNs      [256]uint64 // circular buffer of recent GC pause times, most recent at [(NumGC+255)%256]
+	NotifyTotalNs uint64
+	NotifyNs     [256]uint64 // circular buffer of recent GC notify times, most recent at [(NumGC+255)%256]
 	NumGC        uint32
 	EnableGC     bool
 	DebugGC      bool
@@ -73,3 +75,11 @@ func ReadMemStats(m *MemStats)
 
 // GC runs a garbage collection.
 func GC()
+
+// GCStart resumes a paused collection after a GC callback notification.
+func GCStart()
+
+// Register a function to be called when the runtime wants to GC. The GC will
+// only occur once the callback returns.
+func RegisterGCCallback(gcCallback func(int64, int64, *int64))
+
