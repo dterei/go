@@ -46,6 +46,8 @@ type MemStats struct {
 	PauseTotalNs uint64
 	PauseNs      [256]uint64 // circular buffer of recent GC pause durations, most recent at [(NumGC+255)%256]
 	PauseEnd     [256]uint64 // circular buffer of recent GC pause end times
+	NotifyTotalNs uint64
+	NotifyNs     [256]uint64 // circular buff of recent GC notify durations
 	NumGC        uint32
 	EnableGC     bool
 	DebugGC      bool

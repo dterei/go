@@ -269,6 +269,8 @@ struct MStats
 	uint64	pause_total_ns;
 	uint64	pause_ns[256];  // circular buffer of recent GC pause lengths
 	uint64	pause_end[256]; // circular buffer of recent GC end times (nanoseconds since 1970)
+	uint64  notify_total_ns;
+	uint64  notify_ns[256]; // circular buff of recent GC notify lengths
 	uint32	numgc;
 	bool	enablegc;
 	bool	debuggc;
