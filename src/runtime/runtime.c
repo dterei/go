@@ -286,6 +286,7 @@ static DbgVar dbgvar[] = {
 	{"efence", &runtime·debug.efence},
 	{"gctrace", &runtime·debug.gctrace},
 	{"gcdead", &runtime·debug.gcdead},
+	{"gcnoscvg", &runtime·debug.gcnoscvg},
 	{"scheddetail", &runtime·debug.scheddetail},
 	{"schedtrace", &runtime·debug.schedtrace},
 	{"scavenge", &runtime·debug.scavenge},
