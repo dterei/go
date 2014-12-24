@@ -2932,22 +2932,26 @@ sysmon(void)
 		else
 			idle++;
 
-		// check if we need to force a GC
-		lastgc = runtime·atomicload64(&mstats.last_gc);
-		if(lastgc != 0 && unixnow - lastgc > forcegcperiod && runtime·atomicload(&runtime·forcegc.idle)) {
-			runtime·lock(&runtime·forcegc.lock);
-			runtime·forcegc.idle = 0;
-			runtime·forcegc.g->schedlink = nil;
-			injectglist(runtime·forcegc.g);
-			runtime·unlock(&runtime·forcegc.lock);
-		}
+    if (runtime·debug.gcnoscvg <= 1) {
+      // check if we need to force a GC
+      lastgc = runtime·atomicload64(&mstats.last_gc);
+      if(lastgc != 0 && unixnow - lastgc > forcegcperiod && runtime·atomicload(&runtime·forcegc.idle)) {
+        runtime·lock(&runtime·forcegc.lock);
+        runtime·forcegc.idle = 0;
+        runtime·forcegc.g->schedlink = nil;
+        injectglist(runtime·forcegc.g);
+        runtime·unlock(&runtime·forcegc.lock);
+      }
 
-		// scavenge heap once in a while
-		if(lastscavenge + scavengelimit/2 < now) {
-			runtime·MHeap_Scavenge(nscavenge, now, scavengelimit);
-			lastscavenge = now;
-			nscavenge++;
-		}
+      if (!runtime·debug.gcnoscvg) {
+        // scavenge heap once in a while
+        if(lastscavenge + scavengelimit/2 < now) {
+          runtime·MHeap_Scavenge(nscavenge, now, scavengelimit);
+          lastscavenge = now;
+          nscavenge++;
+        }
+      }
+    }
 
 		if(runtime·debug.schedtrace > 0 && lasttrace + runtime·debug.schedtrace*1000000ll <= now) {
 			lasttrace = now;
